@@ -1,0 +1,11 @@
+def load_to_ml():
+    df = pd.read_csv("../clean/cleaned_avito_data.csv")
+    
+    # تجهيز البيانات للـ ML (مثلاً حذف الأعمدة النصية الطويلة التي لا تفيد الموديل)
+    ml_df = df[['price', 'city_district', 'surface', 'rooms']] # مثال
+    
+    with engine.connect() as conn:
+        conn.execute("CREATE SCHEMA IF NOT EXISTS ml_schema;")
+        
+    ml_df.to_sql('training_data', engine, schema='ml_schema', if_exists='replace')
+    print("✅ تم تجهيز بيانات التدريب في ml_schema")

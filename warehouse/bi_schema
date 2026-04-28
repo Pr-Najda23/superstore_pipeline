@@ -1,0 +1,19 @@
+import pandas as pd
+from sqlalchemy import create_engine
+
+# الاتصال بالقاعدة (نفس الطريقة السابقة)
+engine = create_engine('postgresql://user:pass@localhost:5432/analytics_db')
+
+def load_to_bi():
+    df = pd.read_csv("../clean/cleaned_avito_data.csv")
+    
+    # تحويل البيانات لشكل جدول تحليلي (مثلاً جدول العقارات حسب المدينة)
+    # ننشئ Schema خاص بالـ BI إذا لم يكن موجوداً
+    with engine.connect() as conn:
+        conn.execute("CREATE SCHEMA IF NOT EXISTS bi_schema;")
+    
+    df.to_sql('dim_properties', engine, schema='bi_schema', if_exists='replace')
+    print("✅ تم تجهيز جداول التحليل في bi_schema")
+
+if __name__ == "__main__":
+    load_to_bi()
