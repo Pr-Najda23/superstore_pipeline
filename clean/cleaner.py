@@ -1,158 +1,57 @@
-import time
-import random
-import re
 import pandas as pd
-from selenium import webdriver
-from selenium.webdriver.common.by import By
+import os
+import re
 
-URL = "https://www.avito.ma/fr/maroc/appartements-%C3%A0_vendre"
+def clean_layer_pipeline():
+    # 1. تحديد المسارات (Paths)
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    input_file = os.path.join(base_dir, "..", "avito_data_clean.csv")
+    output_file = os.path.join(base_dir, "..", "staging", "avito_final_refined.csv")
 
-COLUMNS = [
-    "titre",
-    "prix",
-    "ville",
-    "quartier",
-    "surface_m2",
-    "chambres",
-    "sdb",
-    "etage",
-    "annee_construction",
-    "lien"
-]
+    if not os.path.exists(input_file):
+        print(f"❌ Error: {input_file} not found!")
+        return
 
-def init_driver():
-    options = webdriver.ChromeOptions()
-    options.add_argument("--start-maximized")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("user-agent=Mozilla/5.0")
-    return webdriver.Chrome(options=options)
+    # 2. Chargement des données
+    df = pd.read_csv(input_file)
+    print(f"🚀 Processing {len(df)} rows...")
 
-def parse_text(text):
+    # 3. Suppression des doublons (بناءً على الرابط link)
+    df.drop_duplicates(subset=['link'], keep='first', inplace=True)
 
-    titre = text.split("\n")[0] if text else None
+    # 4. Correction des types (Price)
+    df['price'] = pd.to_numeric(df['price'], errors='coerce')
 
-    prix = None
-    m = re.search(r"(\d[\d\s]*)\s?(dh|dhs|mad)", text.lower())
-    if m:
-        prix = m.group(1)
+    # 5. Standardisation (City)
+    # كنستخرجو المدينة اللي كتجي مباشرة مورا كلمة 'dans '
+    def extract_city(location):
+        match = re.search(r'dans\s+([^,]+)', str(location))
+        return match.group(1).strip() if match else "Inconnu"
 
-    ville = None
-    quartier = None
+    df['city'] = df['location'].apply(extract_city)
 
-    # surface / rooms
-    surface = None
-    chambres = None
-    sdb = None
+    # 6. Extraction de Surface (بدقة عالية)
+    def extract_surface(surface_str):
+        if pd.isna(surface_str): return None
+        nums = re.findall(r'\d+', str(surface_str))
+        return int(nums[0]) if nums else None
 
-    m = re.search(r"(\d+)\s?m²", text)
-    if m:
-        surface = int(m.group(1))
+    df['surface_m2'] = df['surface'].apply(extract_surface)
 
-    m = re.search(r"(\d+)\s?ch", text)
-    if m:
-        chambres = int(m.group(1))
+    # 7. Gestion des valeurs manquantes (Imputation)
+    # السطور اللي مافيهمش المساحة (بحال 25 و 28 فالتصويرة) غنعطيوهم متوسط المساحة ديال ديك المدينة
+    df['surface_m2'] = df.groupby('city')['surface_m2'].transform(lambda x: x.fillna(x.median()))
 
-    m = re.search(r"(\d+)\s?sdb", text)
-    if m:
-        sdb = int(m.group(1))
+    # 8. Traitement des valeurs aberrantes (Outliers)
+    # كنحيدو أي شقة ثمنها قل من 100,000 درهم
+    df = df[df['price'] >= 100000]
 
-    return titre, prix, ville, quartier, surface, chambres, sdb
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    df.to_csv(output_file, index=False, encoding='utf-8-sig')
 
-def run():
-
-    driver = init_driver()
-    driver.get(URL)
-    print(driver.current_url)
-    print(driver.title)
-    open("debug.html", "w", encoding="utf-8").write(driver.page_source)
-
-    time.sleep(6)
-
-    for _ in range(4):
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(random.uniform(2, 3))
-
-    # 🔥 IMPORTANT FIX
-    cards = driver.find_elements(By.CSS_SELECTOR, "a[href*='/fr/']")
-
-    print("Cards found:", len(cards))
-
-    data = []
-    seen = set()
-
-    for card in cards:
-        try:
-            link = card.get_attribute("href")
-
-            if not link or link in seen:
-                continue
-
-            seen.add(link)
-
-            text = card.text.strip()
-
-            titre, prix, ville, quartier, surface, chambres, sdb = parse_text(text)
-
-            if not titre:
-                continue
-
-            data.append({
-                "titre": titre,
-                "prix": prix,
-                "ville": ville,
-                "quartier": quartier,
-                "surface_m2": surface,
-                "chambres": chambres,
-                "sdb": sdb,
-                "etage": None,
-                "annee_construction": None,
-                "lien": link
-            })
-
-        except:
-            continue
-
-    driver.quit()
-
-    df = pd.DataFrame(data, columns=COLUMNS)
-
-    print("Extracted rows:", len(df))
-
-    df.to_csv("immo_avito.csv", index=False, encoding="utf-8")
-
-    print("✅ DONE SAVED")
+    print(f"✅ Clean Layer Applied Successfully!")
+    print(f"📊 Rows after cleaning: {len(df)}")
+    print(f"📍 Result saved in: staging/avito_final_refined.csv")
 
 if __name__ == "__main__":
-    run()
-
-
-
-
-
-
-from utils.logger import log
-
-
-def sanitize(ad):
-
-    # حذف أي بيانات حساسة إذا كانت موجودة
-    ad.pop("phone", None)
-    ad.pop("email", None)
-    ad.pop("seller_name", None)
-
-    return ad
-
-
-def process_ads(raw_ads):
-
-    cleaned = []
-
-    for ad in raw_ads:
-
-        ad = sanitize(ad)
-
-        log("Ad cleaned")
-
-        cleaned.append(ad)
-
-    return cleaned
+    clean_layer_pipeline()
