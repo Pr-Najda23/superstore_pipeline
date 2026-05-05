@@ -1,47 +1,68 @@
-version: '3.9'
-
 services:
 
   db:
     image: postgres:15
     container_name: postgres_db
     restart: always
-    env_file:
-      - .env
+    env_file: .env
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
-
     ports:
-      - "5432:5432"
-
+      - "5433:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      retries: 5
 
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin4
+    restart: always
+    network_mode: host
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_LISTEN_PORT: 5050
+    depends_on:
+      db:
+        condition: service_healthy
+
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile.pipline
+    container_name: avito_pipeline
+    restart: on-failure:3
+    env_file: .env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+      - ./staging:/app/staging
 
   app:
     build:
       context: .
-      dockerfile: docker/Dockerfile
-
+      dockerfile: Dockerfile
     container_name: streamlit_app
-
+    restart: always
     ports:
       - "8501:8501"
-
-    depends_on:
-      - db
-
-    env_file:
-      - .env
-
+    env_file: .env
     environment:
       DB_HOST: db
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_PORT: ${DB_PORT}
+      DB_PORT: 5432
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   db_data:

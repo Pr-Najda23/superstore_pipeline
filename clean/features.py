@@ -23,4 +23,4 @@ df['city'] = df['city'].str.capitalize()
 
 # 5. Save
 df.to_csv(output_file, index=False)
-print(f"✅ Features Added! Saved to: {output_file}")
+print(f" Features Added! Saved to: {output_file}")
